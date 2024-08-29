@@ -1,0 +1,72 @@
+var coordinates = [
+  [78.38414664030597, 10.907845258620048],
+  [78.45624441862628, 10.907845258620048],
+  [78.45624441862628, 10.973913398042761],
+  [78.38414664030597, 10.973913398042761],
+  [78.38414664030597, 10.907845258620048]
+];
+
+var polygon = ee.Geometry.Polygon([coordinates]);
+Map.addLayer(polygon, {color: '00000000', width: 2}, 'AOI Border');
+Map.centerObject(polygon, 13);
+
+var startDate = ee.Date('2024-06-15');
+var endDate = ee.Date('2024-08-06');
+var dis_name = 'AOI'
+
+
+var batch = require('users/fitoprincipe/geetools:batch')
+var stackCollection = function(collection) {
+  // Create an initial image.
+  var first = ee.Image(collection.first()).select([]);
+
+  // Write a function that appends a band to an image.
+  var appendBands = function(image, previous) {
+    return ee.Image(previous).addBands(image);
+  };
+  return ee.Image(collection.iterate(appendBands, first));
+};
+
+function mosaicByDate(imcol){
+  var imlist = imcol.toList(imcol.size())
+
+  var unique_dates = imlist.map(function(im){
+    return ee.Image(im).date().format("YYYY-MM-dd")
+  }).distinct()
+
+  var mosaic_imlist = unique_dates.map(function(d){
+    d = ee.Date(d)
+
+    var im = imcol
+      .filterDate(d, d.advance(1, "day"))
+      .mosaic()
+
+    return im.set(
+        "system:time_start", d.millis(), 
+        "system:id", d.format("YYYY-MM-dd"))
+  })
+
+  return ee.ImageCollection(mosaic_imlist)
+}
+
+var s1_collection =  ee.ImageCollection('COPERNICUS/S1_GRD')
+          .filterBounds(polygon)
+          .filterDate(startDate, endDate)
+          .map(function(image){return image.clip(polygon)})
+
+var dateWiseMosaics = mosaicByDate(s1_collection);
+var final_iamge = dateWiseMosaics.select('VV', 'VH')
+var vv = final_iamge.select('VV')
+var vh = final_iamge.select('VH')
+print(vh)
+
+
+var out_name_vv = dis_name+'_VV_{system:id}';
+var out_name_vh = dis_name+'_VH_{system:id}';
+
+
+batch.Download.ImageCollection.toDrive(vv, "AOI_VV",{name: out_name_vv,scale:10,
+                                                      crs: 'EPSG:4326',region: polygon});
+                                                      
+batch.Download.ImageCollection.toDrive(vh, "AOI_VH",{name: out_name_vh,scale:10,
+                                                      crs: 'EPSG:4326',region: polygon});
